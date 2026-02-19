@@ -73,7 +73,14 @@ export interface ConsumeResponse {
 // ============= Socket.IO 클라이언트 → 서버 페이로드 =============
 
 export interface JoinRoomPayload {
-  roomId: string;
+  meetingId: string;
+  userId: string;
+  userName: string;
+}
+
+export interface PeerMeta {
+  userId: string;
+  userName: string;
 }
 
 export interface CreateTransportPayload {
@@ -138,6 +145,8 @@ export interface NewConsumerEvent {
   producerId: string;
   id: string;
   kind: string;
+  userId: string;
+  userName: string;
 }
 
 export interface PeerDisconnectedEvent {

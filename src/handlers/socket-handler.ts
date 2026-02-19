@@ -9,6 +9,8 @@ import {
   ConsumePayload,
   ErrorMessage,
   NewConsumerEvent,
+  PeerMeta,
+  JoinRoomPayload,
 } from "../types/index";
 
 /**
@@ -17,6 +19,7 @@ import {
 export class SocketHandler {
   private roomManager: RoomManager;
   private sfuProxy: SfuProxy;
+  private peerMeta: Map<string, PeerMeta> = new Map();
 
   constructor(roomManager: RoomManager, sfuProxy: SfuProxy) {
     this.roomManager = roomManager;
@@ -68,28 +71,51 @@ export class SocketHandler {
   ): Promise<void> {
     try {
       const typedPayload = payload as Record<string, unknown>;
-      const roomId = typedPayload.roomId;
+      const { meetingId, userId, userName } = typedPayload as JoinRoomPayload;
 
-      if (!Validator.validateRoomId(roomId)) {
+      if (!Validator.validateRoomId(meetingId)) {
         const error: ErrorMessage = {
           type: "error",
-          code: "INVALID_ROOM_ID",
-          message: "Room ID must be a non-empty string",
+          code: "INVALID_MEETING_ID",
+          message: "Meeting ID must be a non-empty string",
         };
         callback(error);
         return;
       }
 
-      // 기존 Producer 조회
-      const otherPeers = this.roomManager.getPeers(roomId, socket.id);
+      if (!userId || typeof userId !== 'string' || !userId.trim()) {
+        const error: ErrorMessage = {
+          type: "error",
+          code: "INVALID_USER_ID",
+          message: "User ID must be a non-empty string",
+        };
+        callback(error);
+        return;
+      }
+
+      if (!userName || typeof userName !== 'string' || !userName.trim()) {
+        const error: ErrorMessage = {
+          type: "error",
+          code: "INVALID_USER_NAME",
+          message: "User name must be a non-empty string",
+        };
+        callback(error);
+        return;
+      }
+
+      // 기존 Producer 조회 (join 전에 다른 피어 목록 조회)
+      const otherPeers = this.roomManager.getPeers(meetingId, socket.id);
       const existingProducers = [];
 
       for (const peerId of otherPeers) {
         try {
+          const meta = this.peerMeta.get(peerId) ?? { userId: '', userName: '' };
           const producersData = await this.sfuProxy.getExistingProducers(peerId);
           if (producersData.producers && producersData.producers.length > 0) {
             existingProducers.push({
               peerId,
+              userId: meta.userId,
+              userName: meta.userName,
               producers: producersData.producers,
             });
           }
@@ -98,8 +124,11 @@ export class SocketHandler {
         }
       }
 
-      // 새 피어를 방에 추가
-      this.roomManager.addPeer(roomId, socket.id);
+      // peerMeta에 사용자 정보 저장
+      this.peerMeta.set(socket.id, { userId, userName });
+
+      // 새 피어를 방에 추가 (meetingId를 roomId 파라미터로 전달)
+      this.roomManager.addPeer(meetingId, socket.id);
 
       // RTP Capabilities 조회
       try {
@@ -255,10 +284,13 @@ export class SocketHandler {
       const roomId = this.roomManager.getRoomId(socket.id);
       if (roomId) {
         const otherPeers = this.roomManager.getPeers(roomId, socket.id);
+        const meta = this.peerMeta.get(socket.id) ?? { userId: '', userName: '' };
         const event: NewConsumerEvent = {
           producerId: produceResponse.id,
           id: socket.id,
           kind,
+          userId: meta.userId,
+          userName: meta.userName,
         };
         otherPeers.forEach((peerId) => {
           socket.to(peerId).emit("newConsumer", event);
@@ -353,6 +385,9 @@ export class SocketHandler {
       });
     });
 
+    // peerMeta 정리
+    this.peerMeta.delete(socket.id);
+
     Logger.info("Peer left room", { socketId: socket.id });
   }
 
@@ -368,6 +403,9 @@ export class SocketHandler {
         socket.to(peerId).emit("peer-disconnected", socket.id);
       });
     });
+
+    // peerMeta 정리
+    this.peerMeta.delete(socket.id);
 
     Logger.info("Client disconnected", { socketId: socket.id });
   }
