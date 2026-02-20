@@ -71,7 +71,7 @@ export class SocketHandler {
   ): Promise<void> {
     try {
       const typedPayload = payload as Record<string, unknown>;
-      const { meetingId, userId, userName } = typedPayload as JoinRoomPayload;
+      const { meetingId, userId, userName } = typedPayload as unknown as JoinRoomPayload;
 
       if (!Validator.validateRoomId(meetingId)) {
         const error: ErrorMessage = {
